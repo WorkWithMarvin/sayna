@@ -55,6 +55,21 @@ impl LiveKitClient {
         self.has_audio_source_atomic.load(Ordering::Acquire)
     }
 
+    /// Return the LiveKit room SID (`RM_...`) and local participant SID (`PA_...`) when connected.
+    pub async fn room_and_participant_sids(&self) -> (Option<String>, Option<String>) {
+        let room_guard = self.room.lock().await;
+        if let Some(room_ref) = room_guard.as_ref() {
+            let room_sid = room_ref.sid().await.to_string();
+            let participant_sid = room_ref.local_participant().sid().to_string();
+            (
+                (!room_sid.is_empty()).then_some(room_sid),
+                (!participant_sid.is_empty()).then_some(participant_sid),
+            )
+        } else {
+            (None, None)
+        }
+    }
+
     /// Disconnect from the room and clean up running tasks.
     pub async fn disconnect(&mut self) -> Result<(), AppError> {
         info!("Disconnecting from LiveKit room");

@@ -3,6 +3,7 @@ mod base;
 pub mod cartesia;
 pub mod deepgram;
 pub mod elevenlabs;
+pub mod fishaudio;
 pub mod google;
 pub mod provider;
 
@@ -14,6 +15,7 @@ pub use base::{
 pub use cartesia::{CARTESIA_TTS_URL, CartesiaTTS};
 pub use deepgram::{DEEPGRAM_TTS_URL, DeepgramTTS};
 pub use elevenlabs::{ELEVENLABS_TTS_URL, ElevenLabsTTS};
+pub use fishaudio::{FISHAUDIO_TTS_URL, FishAudioTTS};
 pub use google::{GOOGLE_TTS_URL, GoogleTTS};
 pub use provider::{TTSProvider, TTSRequestBuilder};
 use std::collections::HashMap;
@@ -48,6 +50,7 @@ pub fn create_tts_provider(provider_type: &str, config: TTSConfig) -> TTSResult<
         "google" => Ok(Box::new(GoogleTTS::new(config)?)),
         "azure" | "microsoft-azure" => Ok(Box::new(AzureTTS::new(config)?)),
         "cartesia" => Ok(Box::new(CartesiaTTS::new(config)?)),
+        "fishaudio" | "fish" => Ok(Box::new(FishAudioTTS::new(config)?)),
         _ => Err(TTSError::InvalidConfiguration(format!(
             "Unsupported TTS provider: {provider_type}. Supported providers: deepgram, elevenlabs, google, azure, cartesia"
         ))),
@@ -65,6 +68,7 @@ pub fn get_tts_provider_urls() -> HashMap<String, String> {
     urls.insert("google".to_string(), GOOGLE_TTS_URL.to_string());
     urls.insert("azure".to_string(), AZURE_TTS_URL.to_string());
     urls.insert("cartesia".to_string(), CARTESIA_TTS_URL.to_string());
+    urls.insert("fishaudio".to_string(), FISHAUDIO_TTS_URL.to_string());
     urls
 }
 
