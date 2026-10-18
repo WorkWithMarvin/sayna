@@ -24,6 +24,12 @@ ARG TARGETARCH
 # Install build dependencies
 # Note: webrtc-sys requires many system libraries for video/graphics support
 # Using multiple mirror fallback strategies for ARM64 compatibility
+#
+# clang 21 comes from apt.llvm.org: webrtc-sys 0.3.49 ships a hermetic libc++ that
+# needs clang 21+ and panics outright on older compilers, and bookworm's clang is 14.
+# The symlinks put it ahead of the distro clang on PATH, which is what both the build
+# script's `clang++` probe and our CC/CXX below resolve through. The key fetch has to
+# come after curl is installed — the slim base has neither curl nor wget.
 RUN rm -rf /var/lib/apt/lists/* \
     && if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
     sed -i 's|deb.debian.org/debian-security|security.debian.org/debian-security|g' /etc/apt/sources.list.d/debian.sources; \
@@ -35,6 +41,12 @@ RUN rm -rf /var/lib/apt/lists/* \
     clang cmake pkg-config libssl-dev libzstd-dev ca-certificates curl git \
     libva-dev libdrm-dev libglib2.0-dev libgbm-dev \
     libx11-dev libxext-dev libxrandr-dev libxcomposite-dev libxdamage-dev libxfixes-dev \
+    && curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key -o /usr/share/keyrings/llvm.asc \
+    && echo "deb [signed-by=/usr/share/keyrings/llvm.asc] http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-21 main" > /etc/apt/sources.list.d/llvm.list \
+    && apt-get update -o Acquire::Retries=5 \
+    && apt-get install -y --no-install-recommends -o Acquire::Retries=5 clang-21 \
+    && ln -sf /usr/bin/clang-21 /usr/local/bin/clang \
+    && ln -sf /usr/bin/clang++-21 /usr/local/bin/clang++ \
     && rm -rf /var/lib/apt/lists/*
 
 # Download ONNX Runtime (architecture-aware for multi-platform builds)
