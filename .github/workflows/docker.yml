@@ -199,15 +199,6 @@ jobs:
             fi
           done
 
-      - name: Publish package visibility
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # GHCR creates a new package private, which would make every image pull need a
-          # login. These images stand in for the DockerHub ones, so keep the package public.
-          gh api -X PATCH "/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/${IMAGE_NAME##*/}" \
-            -f visibility=public
-
       - name: Verify pushed images
         run: |
           echo "## Docker Image Published Successfully!" >> $GITHUB_STEP_SUMMARY
