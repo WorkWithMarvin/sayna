@@ -110,7 +110,7 @@ fn remix_to_f32(samples: &[i16], src_channels: u16, dst_channels: u16) -> Result
         }
         (2, 1) => {
             let mut out = Vec::with_capacity(samples.len() / 2);
-            for pair in samples.chunks_exact(2) {
+            for pair in samples.as_chunks::<2>().0 {
                 out.push((f32::from(pair[0]) + f32::from(pair[1])) * 0.5);
             }
             Ok(out)

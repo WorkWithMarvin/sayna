@@ -1,3 +1,8 @@
+// clippy flags the `#[must_use]` it sees on every `#[async_trait]` method that returns a
+// `Result` (`double_must_use`): both the generated future and the return type are must_use,
+// so the attribute we never wrote is reported as redundant. Nothing in the traits to change.
+#![allow(clippy::double_must_use)]
+
 pub mod auth;
 pub mod config;
 pub mod core;
