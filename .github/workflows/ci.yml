@@ -44,6 +44,14 @@ jobs:
             libva-dev libdrm-dev libglib2.0-dev libgbm-dev \
             libx11-dev libxext-dev libxrandr-dev libxcomposite-dev libxdamage-dev libxfixes-dev
 
+      # webrtc-sys 0.3.49 ships a hermetic libc++ that needs clang 21+, and panics
+      # outright on the distro clang (18 on ubuntu-24.04). Installed after apt so its
+      # bin dir wins the PATH.
+      - name: Install clang 21
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "21"
+
       - name: Format check
         run: cargo fmt --all -- --check
 
