@@ -187,7 +187,11 @@ impl SIPApiClient {
                     nanos: d.subsec_nanos() as i32,
                 }),
                 krisp_enabled: options.krisp_enabled.unwrap_or(false),
-                media_encryption: proto::SipMediaEncryption::SipMediaEncryptDisable as i32,
+                media: Some(proto::SipMediaConfig {
+                    encryption: Some(proto::SipMediaEncryption::SipMediaEncryptDisable as i32),
+                    ..Default::default()
+                }),
+                ..Default::default()
             }),
         };
 
@@ -343,7 +347,11 @@ impl SIPApiClient {
                     .include_headers
                     .unwrap_or(proto::SipHeaderOptions::SipNoHeaders)
                     as i32,
-                media_encryption: proto::SipMediaEncryption::SipMediaEncryptDisable as i32,
+                media: Some(proto::SipMediaConfig {
+                    encryption: Some(proto::SipMediaEncryption::SipMediaEncryptDisable as i32),
+                    ..Default::default()
+                }),
+                ..Default::default()
             }),
         };
 
@@ -453,7 +461,11 @@ impl SIPApiClient {
             }),
             krisp_enabled: options.krisp_enabled,
             wait_until_answered: options.wait_until_answered,
-            media_encryption: proto::SipMediaEncryption::SipMediaEncryptDisable as i32,
+            media: Some(proto::SipMediaConfig {
+                encryption: Some(proto::SipMediaEncryption::SipMediaEncryptDisable as i32),
+                ..Default::default()
+            }),
+            ..Default::default()
         };
 
         // CreateSIPParticipant requires SIPGrants with call permission and VideoGrants

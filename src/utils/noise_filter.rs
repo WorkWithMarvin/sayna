@@ -183,9 +183,8 @@ pub mod implementation {
         let mut wav = Vec::with_capacity(sample_count);
 
         // Convert PCM bytes to float samples
-        // Using chunks_exact for safer iteration while maintaining performance
-        for chunk in pcm.chunks_exact(2) {
-            let sample = i16::from_le_bytes([chunk[0], chunk[1]]) as f32;
+        for chunk in pcm.as_chunks::<2>().0 {
+            let sample = i16::from_le_bytes(*chunk) as f32;
             wav.push((sample * PCM_TO_FLOAT_SCALE).clamp(-1.0, 1.0));
         }
 

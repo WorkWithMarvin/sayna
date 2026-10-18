@@ -179,11 +179,8 @@ impl LiveKitClient {
                         if let Some(callback) = audio_callback {
                             let callback_clone = Arc::clone(callback);
                             let rtc_track = audio_track.rtc_track();
-                            let mut audio_stream = NativeAudioStream::new(
-                                rtc_track,
-                                config.sample_rate as i32,
-                                config.channels as i32,
-                            );
+                            let mut audio_stream =
+                                NativeAudioStream::new(rtc_track, 16000, config.channels as i32);
 
                             let enable_noise_filter = config.enable_noise_filter;
                             #[cfg(feature = "noise-filter")]
@@ -363,6 +360,28 @@ impl LiveKitClient {
                     callback(data_message);
                 } else {
                     debug!("No data callback set, ignoring data message");
+                }
+            }
+            RoomEvent::SipDTMFReceived {
+                code,
+                digit,
+                participant,
+            } => {
+                let participant_identity = participant
+                    .as_ref()
+                    .map(|p| p.identity().to_string())
+                    .unwrap_or_else(|| "sip".to_string());
+                if let Some(callback) = data_callback {
+                    let payload = serde_json::json!({ "code": code, "digit": digit }).to_string();
+                    callback(DataMessage {
+                        participant_identity,
+                        data: payload.into_bytes(),
+                        topic: Some("sip_dtmf".to_string()),
+                        timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64,
+                    });
                 }
             }
             _ => {

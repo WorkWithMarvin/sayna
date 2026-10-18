@@ -95,12 +95,12 @@ object_store = { version = "0.12", features = ["aws", "gcp"] }
 utoipa = { version = "5.3", optional = true, features = ["axum_extras"] }
 
 # LiveKit
-livekit = "=0.7.24"
-livekit-api = "=0.4.9"
-livekit-protocol = "=0.5.1"
+livekit = { version = "=0.9.5", features = ["rustls-tls-webpki-roots"] }
+livekit-api = { version = "=0.9.0", features = ["rustls-tls-webpki-roots"] }
+livekit-protocol = "=0.8.1"
 # Need prost/pbjson-types for SIP API client, using same versions as livekit to avoid conflicts
-prost = "0.12.6"
-pbjson-types = "0.6.0"
+prost = "0.14"
+pbjson-types = "0.9"
 
 deep_filter = { git = "https://github.com/Rikorose/DeepFilterNet", rev = "f1d19bffbeccd98a616f23c89903a2386a1d1dba", package = "deep_filter", default-features = true, features = ["tract", "default-model-ll"], optional = true }
 tract-core = { version = "=0.21.5", optional = true }

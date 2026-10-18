@@ -246,6 +246,12 @@ pub async fn handle_config_message(
         .await;
     }
 
+    let (livekit_room_sid, sayna_participant_sid) = if let Some(ref client) = livekit_client {
+        client.read().await.room_and_participant_sids().await
+    } else {
+        (None, None)
+    };
+
     // Send ready message with optional LiveKit room information
     let _ = message_tx
         .send(MessageRoute::Outgoing(OutgoingMessage::Ready {
@@ -254,6 +260,8 @@ pub async fn handle_config_message(
             livekit_url: Some(app_state.config.livekit_public_url.clone()),
             sayna_participant_identity: sayna_identity,
             sayna_participant_name: sayna_name,
+            livekit_room_sid,
+            sayna_participant_sid,
         }))
         .await;
     if audio_enabled {

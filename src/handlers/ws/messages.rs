@@ -215,6 +215,12 @@ pub enum OutgoingMessage {
         /// Optional display name of the AI agent participant
         #[serde(skip_serializing_if = "Option::is_none")]
         sayna_participant_name: Option<String>,
+        /// Optional LiveKit room SID (`RM_...`)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        livekit_room_sid: Option<String>,
+        /// Optional LiveKit local participant SID (`PA_...`)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sayna_participant_sid: Option<String>,
     },
     #[serde(rename = "stt_result")]
     STTResult {
@@ -315,6 +321,8 @@ mod tests {
             livekit_url: Some("ws://localhost:7880".to_string()),
             sayna_participant_identity: Some("sayna-ai".to_string()),
             sayna_participant_name: Some("Sayna AI".to_string()),
+            livekit_room_sid: Some("RM_123".to_string()),
+            sayna_participant_sid: Some("PA_456".to_string()),
         };
 
         let json = serde_json::to_string(&ready).expect("Should serialize");
@@ -322,6 +330,8 @@ mod tests {
         assert!(json.contains(r#""stream_id":"test-stream-123""#));
         assert!(json.contains(r#""type":"ready""#));
         assert!(json.contains(r#""livekit_room_name":"room-456""#));
+        assert!(json.contains(r#""livekit_room_sid":"RM_123""#));
+        assert!(json.contains(r#""sayna_participant_sid":"PA_456""#));
     }
 
     #[test]
@@ -332,6 +342,8 @@ mod tests {
             livekit_url: None,
             sayna_participant_identity: None,
             sayna_participant_name: None,
+            livekit_room_sid: None,
+            sayna_participant_sid: None,
         };
 
         let json = serde_json::to_string(&ready).expect("Should serialize");
@@ -354,6 +366,8 @@ mod tests {
             livekit_url: None,
             sayna_participant_identity: None,
             sayna_participant_name: None,
+            livekit_room_sid: None,
+            sayna_participant_sid: None,
         };
 
         let json = serde_json::to_string(&ready).expect("Should serialize");
@@ -369,6 +383,8 @@ mod tests {
             livekit_url: None,
             sayna_participant_identity: None,
             sayna_participant_name: None,
+            livekit_room_sid: None,
+            sayna_participant_sid: None,
         };
 
         let json = serde_json::to_string(&ready).expect("Should serialize");

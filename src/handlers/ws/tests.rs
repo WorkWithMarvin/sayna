@@ -374,6 +374,8 @@ fn test_outgoing_message_serialization() {
         livekit_url: None,
         sayna_participant_identity: None,
         sayna_participant_name: None,
+        livekit_room_sid: None,
+        sayna_participant_sid: None,
     };
     let json = serde_json::to_string(&ready_msg).unwrap();
     assert!(json.contains("\"type\":\"ready\""));
@@ -385,6 +387,8 @@ fn test_outgoing_message_serialization() {
         livekit_url: Some("ws://localhost:7880".to_string()),
         sayna_participant_identity: Some("sayna-ai".to_string()),
         sayna_participant_name: Some("Sayna AI".to_string()),
+        livekit_room_sid: Some("RM_123".to_string()),
+        sayna_participant_sid: Some("PA_456".to_string()),
     };
     let json_with_livekit = serde_json::to_string(&ready_msg_with_livekit).unwrap();
     assert!(json_with_livekit.contains("\"type\":\"ready\""));

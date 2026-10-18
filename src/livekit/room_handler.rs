@@ -139,24 +139,24 @@ impl LiveKitRoomHandler {
             room_admin,
             room_record: true,
             room_list: true,
-            can_publish_data: true,
-            can_update_own_metadata: true,
+            can_publish_data: Some(true),
+            can_update_own_metadata: Some(true),
             room_create: true,
             ..Default::default()
         };
 
         match media_mode {
             LiveKitMediaMode::FullMedia => {
-                grants.can_publish = true;
-                grants.can_subscribe = true;
+                grants.can_publish = Some(true);
+                grants.can_subscribe = Some(true);
             }
             LiveKitMediaMode::DataOnly => {
-                grants.can_publish = false;
+                grants.can_publish = Some(false);
                 // can_subscribe must remain true so the LiveKit server negotiates a
                 // subscriber PeerConnection.  Without at least one PC the SDK's
                 // wait_pc_connection check times out.  Actual track subscriptions are
                 // prevented by RoomOptions { auto_subscribe: false }.
-                grants.can_subscribe = true;
+                grants.can_subscribe = Some(true);
             }
         }
 
@@ -1025,9 +1025,9 @@ mod tests {
         assert_eq!(grants.room, "test-room");
         assert!(grants.room_join);
         assert!(!grants.room_admin);
-        assert!(grants.can_publish);
-        assert!(grants.can_subscribe);
-        assert!(grants.can_publish_data);
+        assert_eq!(grants.can_publish, Some(true));
+        assert_eq!(grants.can_subscribe, Some(true));
+        assert_eq!(grants.can_publish_data, Some(true));
     }
 
     #[test]
@@ -1044,9 +1044,9 @@ mod tests {
         assert_eq!(grants.room, "test-room");
         assert!(grants.room_join);
         assert!(grants.room_admin);
-        assert!(grants.can_publish);
-        assert!(grants.can_subscribe);
-        assert!(grants.can_publish_data);
+        assert_eq!(grants.can_publish, Some(true));
+        assert_eq!(grants.can_subscribe, Some(true));
+        assert_eq!(grants.can_publish_data, Some(true));
     }
 
     #[test]
@@ -1068,11 +1068,11 @@ mod tests {
         assert_eq!(grants.room, "test-room");
         assert!(grants.room_join);
         assert!(grants.room_admin);
-        assert!(!grants.can_publish);
+        assert_eq!(grants.can_publish, Some(false));
         // can_subscribe stays true even in DataOnly mode so the subscriber
         // PeerConnection is created (auto_subscribe=false prevents actual tracks).
-        assert!(grants.can_subscribe);
-        assert!(grants.can_publish_data);
+        assert_eq!(grants.can_subscribe, Some(true));
+        assert_eq!(grants.can_publish_data, Some(true));
     }
 
     #[test]

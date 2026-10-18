@@ -184,7 +184,7 @@ pub fn resolve_provider_auth(
     let auth_input = auth_input.expect("checked above");
 
     match provider.as_str() {
-        "deepgram" | "elevenlabs" | "cartesia" => {
+        "deepgram" | "elevenlabs" | "cartesia" | "fishaudio" => {
             auth_input.reject_unknown_keys(&provider, &["api_key"])?;
             Ok(ResolvedProviderAuth::ApiKey {
                 api_key: auth_input.required_string(&provider, "api_key")?,
@@ -239,6 +239,14 @@ fn resolve_server_provider_auth(
                 provider: provider.to_string(),
                 message: "Cartesia API key not configured in server environment".to_string(),
             }),
+        "fishaudio" => std::env::var("FISH_API_KEY")
+            .ok()
+            .filter(|k| !k.is_empty())
+            .map(|api_key| ResolvedProviderAuth::ApiKey { api_key })
+            .ok_or_else(|| ProviderAuthError::MissingServerAuth {
+                provider: provider.to_string(),
+                message: "FISH_API_KEY not configured in server environment".to_string(),
+            }),
         "google" => Ok(ResolvedProviderAuth::Google {
             credentials: server_config.google_credentials.clone().unwrap_or_default(),
         }),
@@ -273,6 +281,7 @@ fn normalize_provider(provider: &str) -> String {
         "elevenlabs" => "elevenlabs".to_string(),
         "google" => "google".to_string(),
         "cartesia" => "cartesia".to_string(),
+        "fishaudio" | "fish" => "fishaudio".to_string(),
         _ => provider.to_lowercase(),
     }
 }

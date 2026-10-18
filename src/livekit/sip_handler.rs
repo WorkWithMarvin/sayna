@@ -272,6 +272,7 @@ impl LiveKitSipHandler {
                 proto::SipDispatchRuleIndividual {
                     room_prefix: dispatch_config.room_prefix.clone(),
                     pin: String::new(),
+                    ..Default::default()
                 },
             );
 
