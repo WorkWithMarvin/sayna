@@ -41,6 +41,21 @@ pub struct WorkerHealth {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
     pub pool: PoolStats,
+    /// Dispatch traffic, so `lk dispatch create` can be followed without logs.
+    pub availability_requests: u64,
+    pub jobs_active: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_job: Option<JobTrace>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct JobTrace {
+    pub id: String,
+    pub room: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 static HEALTH: Mutex<WorkerHealth> = Mutex::new(WorkerHealth {
@@ -54,6 +69,9 @@ static HEALTH: Mutex<WorkerHealth> = Mutex::new(WorkerHealth {
         leased: 0,
         limit: 0,
     },
+    availability_requests: 0,
+    jobs_active: 0,
+    last_job: None,
 });
 
 fn update_health(f: impl FnOnce(&mut WorkerHealth)) {
@@ -211,6 +229,7 @@ impl Worker {
                     match message.message {
                         Some(server_message::Message::Availability(request)) => {
                             let response = self.availability(&request);
+                            update_health(|health| health.availability_requests += 1);
                             if let Err(e) = write_worker(
                                 &mut sink,
                                 WorkerMessage {
@@ -232,6 +251,15 @@ impl Worker {
                             };
 
                             let job_id = brief.job_id.clone();
+                            update_health(|health| {
+                                health.jobs_active += 1;
+                                health.last_job = Some(JobTrace {
+                                    id: brief.job_id.clone(),
+                                    room: brief.room_name.clone(),
+                                    status: "assigned".to_string(),
+                                    error: None,
+                                });
+                            });
                             let task_job_id = job_id.clone();
                             let app = self.app.clone();
                             let pool = self.pool.clone();
@@ -285,6 +313,19 @@ impl Worker {
                 }
                 Some(WorkerEvent::JobDone { job_id, outcome }) = events_rx.recv() => {
                     active.remove(&job_id);
+                    update_health(|health| {
+                        health.jobs_active = health.jobs_active.saturating_sub(1);
+                        if let Some(trace) = health.last_job.as_mut()
+                            && trace.id == job_id
+                        {
+                            trace.status = if outcome.status == JobStatus::JsSuccess as i32 {
+                                "succeeded".to_string()
+                            } else {
+                                "failed".to_string()
+                            };
+                            trace.error = (!outcome.error.is_empty()).then(|| outcome.error.clone());
+                        }
+                    });
                     seq += 1;
                     if let Err(e) = write_worker(&mut sink, job_status(job_id, JobStatus::try_from(outcome.status).unwrap_or(JobStatus::JsFailed), outcome.error)).await {
                         break Err(e);
