@@ -26,7 +26,11 @@ use super::roster::{SlotEvent, SlotId};
 
 /// Keeps pre-warmed sockets alive under intermediary idle timeouts.
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
-const CONNECT_RETRY_BACKOFF: Duration = Duration::from_millis(250);
+const CONNECT_BACKOFF_START: Duration = Duration::from_millis(250);
+const CONNECT_BACKOFF_MAX: Duration = Duration::from_secs(4);
+// Retry inside the slot so a downed Marvin does not turn into a 4-per-second
+// respawn loop; the roster replaces the slot after a cycle.
+const CONNECT_ATTEMPTS: u32 = 8;
 
 pub enum SlotCmd {
     Assign {
@@ -59,13 +63,22 @@ pub(super) async fn run(
 ) {
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
 
-    let ws = match connect(&endpoint).await {
-        Ok(ws) => ws,
-        Err(reason) => {
-            warn!(%reason, "could not open the Marvin socket");
-            tokio::time::sleep(CONNECT_RETRY_BACKOFF).await;
-            report(&pool_tx, id, SlotEvent::Closed { reason });
-            return;
+    let mut backoff = CONNECT_BACKOFF_START;
+    let mut attempt = 0;
+    let ws = loop {
+        match connect(&endpoint).await {
+            Ok(ws) => break ws,
+            Err(reason) => {
+                attempt += 1;
+                if attempt >= CONNECT_ATTEMPTS {
+                    warn!(%reason, attempts = attempt, "giving up on the Marvin socket");
+                    report(&pool_tx, id, SlotEvent::Closed { reason });
+                    return;
+                }
+                warn!(%reason, attempt, "could not open the Marvin socket");
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(CONNECT_BACKOFF_MAX);
+            }
         }
     };
     let (mut sink, mut stream) = ws.split();
