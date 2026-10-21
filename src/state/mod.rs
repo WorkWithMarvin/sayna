@@ -252,6 +252,11 @@ mod tests {
             livekit_api_key: Some("test_key".to_string()),
             livekit_api_secret: Some("test_secret".to_string()),
             livekit_agent_name: None,
+            marvin_ws_url: None,
+            marvin_ws_token: None,
+            worker_pool_min: 2,
+            worker_pool_spare: 2,
+            worker_pool_max: 50,
             deepgram_api_key: None,
             elevenlabs_api_key: None,
             google_credentials: None,
@@ -288,6 +293,11 @@ mod tests {
             livekit_api_key: None,    // Missing API key
             livekit_api_secret: None, // Missing API secret
             livekit_agent_name: None,
+            marvin_ws_url: None,
+            marvin_ws_token: None,
+            worker_pool_min: 2,
+            worker_pool_spare: 2,
+            worker_pool_max: 50,
             deepgram_api_key: None,
             elevenlabs_api_key: None,
             google_credentials: None,

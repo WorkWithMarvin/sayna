@@ -20,6 +20,11 @@ use super::recording::RecordingYaml;
 ///   public_url: "http://localhost:7880"
 ///   api_key: "your-api-key"
 ///   api_secret: "your-api-secret"
+///   marvin_ws_url: "ws://marvin.example.com/voice/ws"
+///   marvin_ws_token: "shared-secret"
+///   worker_pool_min: 2
+///   worker_pool_spare: 2
+///   worker_pool_max: 50
 ///
 /// providers:
 ///   deepgram_api_key: "your-deepgram-key"
@@ -94,6 +99,11 @@ pub struct LiveKitYaml {
     pub api_key: Option<String>,
     pub api_secret: Option<String>,
     pub agent_name: Option<String>,
+    pub marvin_ws_url: Option<String>,
+    pub marvin_ws_token: Option<String>,
+    pub worker_pool_min: Option<usize>,
+    pub worker_pool_spare: Option<usize>,
+    pub worker_pool_max: Option<usize>,
 }
 
 /// Provider API keys from YAML

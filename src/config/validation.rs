@@ -61,6 +61,32 @@ pub fn validate_auth_required(
     Ok(())
 }
 
+/// Validate worker pool sizing.
+///
+/// `max` bounds every other value: a pool with no capacity can never lease a
+/// socket, and `min`/`spare` above it would make the roster request sockets it
+/// is forbidden to open.
+pub fn validate_worker_pool(
+    min: usize,
+    spare: usize,
+    max: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if max == 0 {
+        return Err("WORKER_POOL_MAX must be at least 1".into());
+    }
+    if min > max {
+        return Err(
+            format!("WORKER_POOL_MIN ({min}) must not exceed WORKER_POOL_MAX ({max})").into(),
+        );
+    }
+    if spare > max {
+        return Err(
+            format!("WORKER_POOL_SPARE ({spare}) must not exceed WORKER_POOL_MAX ({max})").into(),
+        );
+    }
+    Ok(())
+}
+
 /// Validate API secret authentication entries
 ///
 /// Ensures that:
@@ -1042,5 +1068,21 @@ mod tests {
 
         let result = validate_sip_config(&Some(config), false);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_worker_pool_accepts_defaults() {
+        assert!(validate_worker_pool(2, 2, 50).is_ok());
+    }
+
+    #[test]
+    fn test_validate_worker_pool_rejects_zero_max() {
+        assert!(validate_worker_pool(0, 0, 0).is_err());
+    }
+
+    #[test]
+    fn test_validate_worker_pool_rejects_sizes_above_max() {
+        assert!(validate_worker_pool(3, 0, 2).is_err());
+        assert!(validate_worker_pool(0, 3, 2).is_err());
     }
 }

@@ -22,6 +22,13 @@ livekit:
   api_secret: "your-livekit-api-secret"   # ENV: LIVEKIT_API_SECRET
   agent_name: "my-agent"                   # ENV: AGENT_NAME (fallback LIVEKIT_AGENT_NAME)
 
+  # Marvin worker (optional). Unset marvin_ws_url keeps the plain /ws server.
+  # marvin_ws_url: "ws://marvin.example.com/voice/ws"  # ENV: MARVIN_WS_URL
+  # marvin_ws_token: "shared-secret"                   # ENV: MARVIN_WS_TOKEN
+  worker_pool_min: 2                                  # ENV: WORKER_POOL_MIN
+  worker_pool_spare: 2                                # ENV: WORKER_POOL_SPARE
+  worker_pool_max: 50                                 # ENV: WORKER_POOL_MAX
+
 # Provider API keys
 providers:
   deepgram_api_key: "your-deepgram-api-key"     # ENV: DEEPGRAM_API_KEY

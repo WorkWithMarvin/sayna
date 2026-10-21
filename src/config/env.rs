@@ -5,7 +5,9 @@ use super::parse_auth_api_secrets_json;
 use super::recording::RecordingYaml;
 use super::sip::{SipConfig, SipHookConfig};
 use super::utils::parse_bool;
-use super::validation::{validate_auth_api_secrets, validate_auth_required, validate_jwt_auth};
+use super::validation::{
+    validate_auth_api_secrets, validate_auth_required, validate_jwt_auth, validate_worker_pool,
+};
 use super::{AuthApiSecret, ServerConfig};
 
 impl ServerConfig {
@@ -38,6 +40,23 @@ impl ServerConfig {
         let livekit_agent_name = env::var("AGENT_NAME")
             .or_else(|_| env::var("LIVEKIT_AGENT_NAME"))
             .ok();
+
+        // Marvin worker configuration
+        let marvin_ws_url = env::var("MARVIN_WS_URL").ok();
+        let marvin_ws_token = env::var("MARVIN_WS_TOKEN").ok();
+        let worker_pool_min = env::var("WORKER_POOL_MIN")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(2);
+        let worker_pool_spare = env::var("WORKER_POOL_SPARE")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(2);
+        let worker_pool_max = env::var("WORKER_POOL_MAX")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(50);
+        validate_worker_pool(worker_pool_min, worker_pool_spare, worker_pool_max)?;
 
         // Provider API keys
         let deepgram_api_key = env::var("DEEPGRAM_API_KEY").ok();
@@ -121,6 +140,11 @@ impl ServerConfig {
             livekit_api_key,
             livekit_api_secret,
             livekit_agent_name,
+            marvin_ws_url,
+            marvin_ws_token,
+            worker_pool_min,
+            worker_pool_spare,
+            worker_pool_max,
             deepgram_api_key,
             elevenlabs_api_key,
             google_credentials,
