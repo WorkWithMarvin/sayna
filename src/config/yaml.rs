@@ -93,6 +93,7 @@ pub struct LiveKitYaml {
     pub public_url: Option<String>,
     pub api_key: Option<String>,
     pub api_secret: Option<String>,
+    pub agent_name: Option<String>,
 }
 
 /// Provider API keys from YAML

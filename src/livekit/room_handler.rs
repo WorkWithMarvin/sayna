@@ -63,6 +63,10 @@ pub struct LiveKitRoomHandler {
     egress_client: EgressClient,
     /// Optional recording configuration
     recording_config: Option<RecordingConfig>,
+    /// Agent name sent as `lk.agent_name` participant attribute on agent tokens.
+    /// When `None`, no agent-name attribute is set (participant is still marked
+    /// as agent kind so LiveKit no longer shows it as a plain participant).
+    agent_name: Option<String>,
 }
 
 impl LiveKitRoomHandler {
@@ -105,7 +109,23 @@ impl LiveKitRoomHandler {
             room_client,
             egress_client,
             recording_config,
+            agent_name: None,
         })
+    }
+
+    /// Set the agent name sent on agent tokens (builder style).
+    pub fn with_agent_name(mut self, agent_name: Option<String>) -> Self {
+        self.agent_name = agent_name
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        self
+    }
+
+    /// Set the agent name sent on agent tokens.
+    pub fn set_agent_name(&mut self, agent_name: Option<String>) {
+        self.agent_name = agent_name
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
     }
 
     /// Create video grants permissions for a room
@@ -165,6 +185,16 @@ impl LiveKitRoomHandler {
 
     fn token_permissions(&self, room_name: &str, room_admin: bool) -> VideoGrants {
         self.token_permissions_with_media_mode(room_name, room_admin, LiveKitMediaMode::FullMedia)
+    }
+
+    /// Stamp agent identity onto a token builder: kind=agent + optional
+    /// `lk.agent_name` attribute so LiveKit can attribute the session.
+    fn apply_agent_identity(&self, token: AccessToken) -> AccessToken {
+        let token = token.with_kind("agent");
+        match &self.agent_name {
+            Some(name) => token.with_attributes([("lk.agent_name".to_string(), name.clone())]),
+            None => token,
+        }
     }
 
     /// Generate a JWT token for a regular user
@@ -243,10 +273,15 @@ impl LiveKitRoomHandler {
         identity: &str,
         name: &str,
     ) -> Result<String, LiveKitError> {
-        let token = AccessToken::with_api_key(&self.api_key, &self.api_secret)
-            .with_identity(identity)
-            .with_name(name)
-            .with_grants(self.token_permissions(room_name, true))
+        let mut grants = self.token_permissions(room_name, true);
+        grants.agent = true;
+        let token = self
+            .apply_agent_identity(
+                AccessToken::with_api_key(&self.api_key, &self.api_secret)
+                    .with_identity(identity)
+                    .with_name(name)
+                    .with_grants(grants),
+            )
             .to_jwt()
             .map_err(|e| {
                 LiveKitError::ConnectionFailed(format!("Failed to generate agent token: {e}"))
@@ -283,10 +318,15 @@ impl LiveKitRoomHandler {
         name: &str,
         media_mode: LiveKitMediaMode,
     ) -> Result<String, LiveKitError> {
-        let token = AccessToken::with_api_key(&self.api_key, &self.api_secret)
-            .with_identity(identity)
-            .with_name(name)
-            .with_grants(self.token_permissions_with_media_mode(room_name, true, media_mode))
+        let mut grants = self.token_permissions_with_media_mode(room_name, true, media_mode);
+        grants.agent = true;
+        let token = self
+            .apply_agent_identity(
+                AccessToken::with_api_key(&self.api_key, &self.api_secret)
+                    .with_identity(identity)
+                    .with_name(name)
+                    .with_grants(grants),
+            )
             .with_sip_grants(SIPGrants {
                 admin: true,
                 ..Default::default()
@@ -1105,6 +1145,32 @@ mod tests {
         assert!(result.is_ok());
         let token = result.unwrap();
         assert!(!token.is_empty());
+    }
+
+    #[test]
+    fn test_agent_token_carries_agent_kind_and_name() {
+        use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+        let handler = LiveKitRoomHandler::new(
+            "http://localhost:7880".to_string(),
+            "test_key".to_string(),
+            "test_secret".to_string(),
+            None,
+        )
+        .unwrap()
+        .with_agent_name(Some("my-agent".to_string()));
+
+        let token = handler
+            .agent_token("test-room", "test-agent", "Test Agent")
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(
+            &URL_SAFE_NO_PAD
+                .decode(token.split('.').nth(1).unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(payload["kind"], "agent");
+        assert_eq!(payload["video"]["agent"], true);
+        assert_eq!(payload["attributes"]["lk.agent_name"], "my-agent");
     }
 
     #[test]

@@ -83,6 +83,13 @@ pub fn merge_config(
         yaml.livekit.as_ref().and_then(|l| l.api_secret.clone())
     );
 
+    let livekit_agent_name = yaml
+        .livekit
+        .as_ref()
+        .and_then(|l| l.agent_name.clone())
+        .or_else(|| env::var("AGENT_NAME").ok())
+        .or_else(|| env::var("LIVEKIT_AGENT_NAME").ok());
+
     // Provider API keys
     let deepgram_api_key = get_optional!(
         "DEEPGRAM_API_KEY",
@@ -234,6 +241,7 @@ pub fn merge_config(
         livekit_public_url,
         livekit_api_key,
         livekit_api_secret,
+        livekit_agent_name,
         deepgram_api_key,
         elevenlabs_api_key,
         google_credentials,

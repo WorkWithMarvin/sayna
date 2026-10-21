@@ -352,6 +352,7 @@ mod tests {
             livekit_public_url: "http://localhost:7880".to_string(),
             livekit_api_key: None,
             livekit_api_secret: None,
+        livekit_agent_name: None,
             deepgram_api_key: Some("dg-server-key".to_string()),
             elevenlabs_api_key: Some("el-server-key".to_string()),
             google_credentials: Some("/tmp/google.json".to_string()),

@@ -35,6 +35,9 @@ impl ServerConfig {
             env::var("LIVEKIT_PUBLIC_URL").unwrap_or_else(|_| "http://localhost:7880".to_string());
         let livekit_api_key = env::var("LIVEKIT_API_KEY").ok();
         let livekit_api_secret = env::var("LIVEKIT_API_SECRET").ok();
+        let livekit_agent_name = env::var("AGENT_NAME")
+            .or_else(|_| env::var("LIVEKIT_AGENT_NAME"))
+            .ok();
 
         // Provider API keys
         let deepgram_api_key = env::var("DEEPGRAM_API_KEY").ok();
@@ -117,6 +120,7 @@ impl ServerConfig {
             livekit_public_url,
             livekit_api_key,
             livekit_api_secret,
+            livekit_agent_name,
             deepgram_api_key,
             elevenlabs_api_key,
             google_credentials,

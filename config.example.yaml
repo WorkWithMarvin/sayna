@@ -20,6 +20,7 @@ livekit:
   public_url: "http://localhost:7880"     # ENV: LIVEKIT_PUBLIC_URL
   api_key: "your-livekit-api-key"         # ENV: LIVEKIT_API_KEY
   api_secret: "your-livekit-api-secret"   # ENV: LIVEKIT_API_SECRET
+  agent_name: "my-agent"                   # ENV: AGENT_NAME (fallback LIVEKIT_AGENT_NAME)
 
 # Provider API keys
 providers:
