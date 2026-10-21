@@ -8,6 +8,7 @@ pub mod slot;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use livekit_protocol::{
@@ -27,6 +28,48 @@ pub use pool::{
     AcquireError, JobBrief, MarvinEndpoint, ParticipantBrief, Pool, PoolError, PoolLimits,
     PoolStats, SlotIo,
 };
+
+/// Live worker state, surfaced by `GET /`. The container has no log stream, so
+/// this is the only way to see why `/agent` registration failed.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct WorkerHealth {
+    pub agent_name: String,
+    pub registered: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worker_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    pub pool: PoolStats,
+}
+
+static HEALTH: Mutex<WorkerHealth> = Mutex::new(WorkerHealth {
+    agent_name: String::new(),
+    registered: false,
+    worker_id: None,
+    last_error: None,
+    pool: PoolStats {
+        idle: 0,
+        warming: 0,
+        leased: 0,
+        limit: 0,
+    },
+});
+
+fn update_health(f: impl FnOnce(&mut WorkerHealth)) {
+    if let Ok(mut health) = HEALTH.lock() {
+        f(&mut health);
+    }
+}
+
+/// `None` when the worker is disabled (`MARVIN_WS_URL` unset).
+pub fn health() -> Option<WorkerHealth> {
+    HEALTH
+        .lock()
+        .ok()
+        .map(|health| health.clone())
+        .filter(|health| !health.agent_name.is_empty())
+}
 
 const PING_INTERVAL: Duration = Duration::from_secs(10);
 const RECONNECT_DELAY: Duration = Duration::from_secs(1);
@@ -98,6 +141,10 @@ impl Worker {
         };
         let pool = Pool::start(config.marvin.clone(), config.limits.clone())?;
         let worker = Worker { config, pool, app };
+        update_health(|health| {
+            health.agent_name = worker.config.agent_name.clone();
+            health.pool = worker.pool.stats();
+        });
 
         let runner = worker.clone();
         tokio::spawn(async move { runner.run().await });
@@ -113,7 +160,13 @@ impl Worker {
         loop {
             if let Err(e) = self.run_once().await {
                 warn!(%e, "LiveKit worker connection lost; reconnecting");
+                update_health(|health| {
+                    health.registered = false;
+                    health.last_error = Some(e.to_string());
+                });
                 tokio::time::sleep(RECONNECT_DELAY).await;
+            } else {
+                update_health(|health| health.registered = false);
             }
         }
     }
@@ -126,6 +179,11 @@ impl Worker {
             agent = %self.config.agent_name,
             "LiveKit worker registered"
         );
+        update_health(|health| {
+            health.registered = true;
+            health.worker_id = Some(registered.worker_id.clone());
+            health.last_error = None;
+        });
 
         let (mut sink, mut stream) = link.into_parts();
         let (events_tx, mut events_rx) = mpsc::unbounded_channel();
@@ -233,6 +291,7 @@ impl Worker {
 
     fn availability(&self, request: &AvailabilityRequest) -> AvailabilityResponse {
         let stats = self.pool.stats();
+        update_health(|health| health.pool = stats.clone());
         AvailabilityResponse {
             job_id: request
                 .job

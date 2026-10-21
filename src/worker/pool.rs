@@ -89,7 +89,8 @@ pub enum AcquireError {
     PoolClosed,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PoolStats {
     pub idle: usize,
     pub warming: usize,

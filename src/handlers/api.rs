@@ -8,6 +8,9 @@ pub struct HealthResponse {
     /// Server status
     #[cfg_attr(feature = "openapi", schema(example = "OK"))]
     pub status: String,
+    /// LiveKit worker state; absent when the worker is disabled
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worker: Option<crate::worker::WorkerHealth>,
 }
 
 /// Health check handler
@@ -26,5 +29,6 @@ pub struct HealthResponse {
 pub async fn health_check() -> Result<Json<HealthResponse>, StatusCode> {
     Ok(Json(HealthResponse {
         status: "OK".to_string(),
+        worker: crate::worker::health(),
     }))
 }
