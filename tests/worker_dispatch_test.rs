@@ -7,7 +7,7 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use livekit_protocol::{
     AvailabilityRequest, Job, JobAssignment, JobStatus, JobType, RegisterWorkerResponse, Room,
-    ServerMessage, WorkerMessage, server_message, worker_message,
+    ServerMessage, WorkerMessage, WorkerStatus, server_message, worker_message,
 };
 use prost::Message as ProstMessage;
 use sayna::worker::Worker;
@@ -168,6 +168,14 @@ async fn worker_registers_assigns_and_runs_a_marvin_session() {
     )
     .await;
 
+    // LiveKit only dispatches to workers that report status, so registration is
+    // followed by a status frame before any availability request.
+    let Some(worker_message::Message::UpdateWorker(status)) = next_worker(&mut agent).await.message
+    else {
+        panic!("expected a worker status frame after registration");
+    };
+    assert_eq!(status.status, Some(WorkerStatus::WsAvailable as i32));
+
     // The socket is already open before the job exists.
     let mut marvin = recv_conn(&mut marvin_conns).await;
 
@@ -194,14 +202,17 @@ async fn worker_registers_assigns_and_runs_a_marvin_session() {
     )
     .await;
 
-    let availability = next_worker(&mut agent).await;
-    let Some(worker_message::Message::Availability(response)) = availability.message else {
-        panic!("expected an availability response");
+    let availability = loop {
+        match next_worker(&mut agent).await.message {
+            Some(worker_message::Message::Availability(response)) => break response,
+            Some(_) => continue,
+            None => panic!("agent connection ended before the availability response"),
+        }
     };
-    assert!(response.available);
-    assert_eq!(response.job_id, "AJ_1");
-    assert_eq!(response.participant_identity, "marvin-agent");
-    assert_eq!(response.participant_name, "Marvin");
+    assert!(availability.available);
+    assert_eq!(availability.job_id, "AJ_1");
+    assert_eq!(availability.participant_identity, "marvin-agent");
+    assert_eq!(availability.participant_name, "Marvin");
 
     send_proto(
         &mut agent,
