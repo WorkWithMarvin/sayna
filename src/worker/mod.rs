@@ -16,7 +16,7 @@ use livekit_protocol::{
     WorkerMessage, WorkerPong, WorkerStatus, server_message, worker_message,
 };
 use tokio::sync::{mpsc, oneshot};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::config::ServerConfig;
 use crate::state::AppState;
@@ -60,6 +60,10 @@ fn update_health(f: impl FnOnce(&mut WorkerHealth)) {
     if let Ok(mut health) = HEALTH.lock() {
         f(&mut health);
     }
+}
+
+pub(crate) fn set_pool_stats(stats: PoolStats) {
+    update_health(|health| health.pool = stats);
 }
 
 /// `None` when the worker is disabled (`MARVIN_WS_URL` unset).
@@ -192,6 +196,9 @@ impl Worker {
         ping.tick().await;
         let mut seq = 0u64;
 
+        // A registered worker that never reports load is not dispatched to.
+        write_worker(&mut sink, worker_status(0, self.pool.stats().limit, seq)).await?;
+
         let outcome = loop {
             tokio::select! {
                 incoming = read_server(&mut stream) => {
@@ -199,6 +206,7 @@ impl Worker {
                         Ok(message) => message,
                         Err(e) => break Err(e),
                     };
+                    debug!(frame = frame_kind(&message), "LiveKit /agent frame");
 
                     match message.message {
                         Some(server_message::Message::Availability(request)) => {
@@ -267,6 +275,11 @@ impl Worker {
                         })),
                     };
                     if let Err(e) = write_worker(&mut sink, ping).await {
+                        break Err(e);
+                    }
+                    seq += 1;
+                    let status = worker_status(active.len(), self.pool.stats().limit, seq);
+                    if let Err(e) = write_worker(&mut sink, status).await {
                         break Err(e);
                     }
                 }
@@ -342,6 +355,18 @@ fn worker_status(job_count: usize, limit: usize, seq: u64) -> WorkerMessage {
             draining: false,
             seq,
         })),
+    }
+}
+
+fn frame_kind(message: &livekit_protocol::ServerMessage) -> &'static str {
+    match message.message {
+        Some(server_message::Message::Register(_)) => "register",
+        Some(server_message::Message::Availability(_)) => "availability",
+        Some(server_message::Message::Assignment(_)) => "assignment",
+        Some(server_message::Message::Termination(_)) => "termination",
+        Some(server_message::Message::Pong(_)) => "pong",
+        Some(server_message::Message::GoAway(_)) => "go_away",
+        None => "empty",
     }
 }
 

@@ -418,6 +418,7 @@ fn reconcile(roster: &mut Roster, shared: &PoolShared, next_id: &mut u64) {
 
     if let Ok(mut snapshot) = shared.snapshot.lock() {
         *snapshot = roster.stats(shared.limits.max);
+        crate::worker::set_pool_stats(snapshot.clone());
     }
 }
 
