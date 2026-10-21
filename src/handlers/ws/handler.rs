@@ -179,6 +179,18 @@ async fn handle_voice_socket(socket: WebSocket, app_state: Arc<AppState>, auth: 
     // Clean up resources
     sender_task.abort();
 
+    cleanup_connection_resources(&app_state, &state, true).await;
+
+    info!("WebSocket voice connection terminated");
+}
+
+/// Tear down a session. Dispatched jobs pass `delete_room: false`: the room
+/// belongs to LiveKit and Marvin decides when the call is over.
+pub(crate) async fn cleanup_connection_resources(
+    app_state: &Arc<AppState>,
+    state: &Arc<RwLock<ConnectionState>>,
+    delete_room: bool,
+) {
     // Snapshot state before cleanup so we can drop the read lock before awaiting
     let (voice_manager, livekit_client, recording_egress_id, room_name) = {
         let state_guard = state.read().await;
@@ -225,8 +237,9 @@ async fn handle_voice_socket(socket: WebSocket, app_state: Arc<AppState>, auth: 
         }
     }
 
-    // Delete room if it exists
-    if let (Some(room), Some(room_handler)) = (&room_name, &app_state.livekit_room_handler) {
+    if delete_room
+        && let (Some(room), Some(room_handler)) = (&room_name, &app_state.livekit_room_handler)
+    {
         info!("Deleting LiveKit room: {}", room);
         if let Err(e) = room_handler.delete_room(room).await {
             error!("Failed to delete room: {:?}", e);
@@ -234,8 +247,6 @@ async fn handle_voice_socket(socket: WebSocket, app_state: Arc<AppState>, auth: 
             info!("Room deleted successfully");
         }
     }
-
-    info!("WebSocket voice connection terminated");
 }
 
 /// Process incoming WebSocket message with optimizations
@@ -257,7 +268,7 @@ async fn handle_voice_socket(socket: WebSocket, app_state: Arc<AppState>, auth: 
 /// - Fast JSON parsing with pre-validation
 /// - Zero-copy audio data handling where possible
 #[inline(always)]
-async fn process_message(
+pub(crate) async fn process_message(
     msg: Message,
     state: &Arc<RwLock<ConnectionState>>,
     message_tx: &mpsc::Sender<MessageRoute>,

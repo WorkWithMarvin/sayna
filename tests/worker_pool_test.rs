@@ -1,4 +1,5 @@
 //! End-to-end behaviour of the outbound Marvin socket pool.
+#![allow(clippy::result_large_err)]
 
 use std::time::Duration;
 

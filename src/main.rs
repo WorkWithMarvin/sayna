@@ -119,6 +119,12 @@ async fn main() -> anyhow::Result<()> {
     // Create application state
     let app_state = AppState::new(config).await;
 
+    // The LiveKit worker is opt-in: without MARVIN_WS_URL the plain /ws server
+    // behaves exactly as before.
+    if let Some(worker) = sayna::worker::Worker::start(app_state.clone()).await? {
+        println!("LiveKit worker started as {}", worker.agent_name());
+    }
+
     // Create protected API routes with authentication middleware
     let protected_routes = routes::api::create_api_router().layer(middleware::from_fn_with_state(
         app_state.clone(),

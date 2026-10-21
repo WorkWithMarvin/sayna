@@ -16,8 +16,6 @@ use crate::config::ServerConfig;
 use super::roster::{Roster, SlotEvent, SlotId};
 use super::slot::{Ack, SlotCmd, SlotInput};
 
-/// A write to a freshly leased socket may fail if it died between the lease
-/// and the frame. That is retried; a peer that accepts slowly is not.
 const ASSIGN_ACK_TIMEOUT: Duration = Duration::from_secs(5);
 const WARM_TIMEOUT: Duration = Duration::from_secs(10);
 const REAP_INTERVAL: Duration = Duration::from_secs(1);
@@ -103,6 +101,10 @@ impl PoolStats {
     pub fn total(&self) -> usize {
         self.idle + self.warming + self.leased
     }
+
+    pub fn has_capacity(&self) -> bool {
+        self.idle + self.warming > 0 || self.total() < self.limit
+    }
 }
 
 /// The projection of a LiveKit job that Marvin needs. Built once at the
@@ -127,6 +129,18 @@ pub struct ParticipantBrief {
     pub attributes: HashMap<String, String>,
 }
 
+impl ParticipantBrief {
+    pub fn from_proto(p: &livekit_protocol::ParticipantInfo) -> Self {
+        Self {
+            identity: p.identity.clone(),
+            name: p.name.clone(),
+            sid: p.sid.clone(),
+            kind: participant_kind(p.kind),
+            attributes: p.attributes.clone(),
+        }
+    }
+}
+
 impl JobBrief {
     pub fn from_job(job: &livekit_protocol::Job) -> Option<JobBrief> {
         let room = job.room.as_ref()?;
@@ -141,13 +155,7 @@ impl JobBrief {
             }
             .to_string(),
             metadata: job.metadata.clone(),
-            participant: job.participant.as_ref().map(|p| ParticipantBrief {
-                identity: p.identity.clone(),
-                name: p.name.clone(),
-                sid: p.sid.clone(),
-                kind: participant_kind(p.kind),
-                attributes: p.attributes.clone(),
-            }),
+            participant: job.participant.as_ref().map(ParticipantBrief::from_proto),
         })
     }
 }
@@ -180,7 +188,7 @@ struct PoolShared {
 
 pub(super) enum PoolMsg {
     Assign {
-        job: JobBrief,
+        job: Box<JobBrief>,
         input: mpsc::UnboundedSender<SlotInput>,
         reply: oneshot::Sender<Result<Lease, LeaseError>>,
     },
@@ -261,7 +269,7 @@ impl Pool {
             let (reply_tx, reply_rx) = oneshot::channel();
             self.tx
                 .send(PoolMsg::Assign {
-                    job: job.clone(),
+                    job: Box::new(job.clone()),
                     input: input_tx,
                     reply: reply_tx,
                 })
@@ -317,7 +325,7 @@ async fn run_actor(shared: Arc<PoolShared>, mut rx: mpsc::UnboundedReceiver<Pool
                 None | Some(PoolMsg::Shutdown) => return,
                 Some(PoolMsg::Slot { slot_id, event }) => roster.apply(slot_id, event),
                 Some(PoolMsg::Assign { job, input, reply }) => {
-                    assign(&mut roster, job, input, reply);
+                    assign(&mut roster, &shared.tx, *job, input, reply);
                 }
             },
             _ = reap.tick() => {
@@ -333,6 +341,7 @@ async fn run_actor(shared: Arc<PoolShared>, mut rx: mpsc::UnboundedReceiver<Pool
 
 fn assign(
     roster: &mut Roster,
+    pool_tx: &mpsc::UnboundedSender<PoolMsg>,
     job: JobBrief,
     input: mpsc::UnboundedSender<SlotInput>,
     reply: oneshot::Sender<Result<Lease, LeaseError>>,
@@ -360,10 +369,20 @@ fn assign(
         return;
     }
 
+    let pool_tx = pool_tx.clone();
     tokio::spawn(async move {
         let result = match tokio::time::timeout(ASSIGN_ACK_TIMEOUT, ack_rx).await {
             Ok(Ok(Ack::Accepted)) => Ok(Lease { slot_id, out }),
-            Ok(Ok(Ack::Gone)) | Ok(Err(_)) | Err(_) => Err(LeaseError::Stale),
+            Ok(Ok(Ack::Gone)) | Ok(Err(_)) | Err(_) => {
+                let _ = out.send(SlotCmd::Close);
+                let _ = pool_tx.send(PoolMsg::Slot {
+                    slot_id,
+                    event: SlotEvent::Closed {
+                        reason: "assign ack failed".to_string(),
+                    },
+                });
+                Err(LeaseError::Stale)
+            }
         };
         let _ = reply.send(result);
     });

@@ -8,8 +8,9 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 use super::config::{
-    LiveKitWebSocketConfig, LoadingAudioConfig, STTWebSocketConfig, TTSWebSocketConfig,
-    TurnDetectConfigUpdate, VADConfigUpdate, default_allow_interruption, default_audio_enabled,
+    LiveKitWebSocketConfig, LoadingAudioConfig, STTWebSocketConfig, SipDialConfig,
+    TTSWebSocketConfig, TurnDetectConfigUpdate, VADConfigUpdate, default_allow_interruption,
+    default_audio_enabled,
 };
 
 /// WebSocket message types for incoming messages
@@ -47,6 +48,9 @@ pub enum IncomingMessage {
         /// Optional loading-indicator audio configuration.
         #[serde(skip_serializing_if = "Option::is_none")]
         loading_audio: Option<LoadingAudioConfig>,
+        /// Optional outbound SIP dial to perform before the session is ready.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sip_dial: Option<SipDialConfig>,
     },
     #[serde(rename = "speak")]
     Speak {
@@ -296,6 +300,18 @@ pub enum OutgoingMessage {
     SIPTransferError {
         /// Error message describing why the transfer failed
         message: String,
+    },
+    /// Outbound SIP dial requested by the client failed.
+    #[serde(rename = "outbound_call_failed")]
+    OutboundCallFailed {
+        /// Human-readable failure reason
+        reason: String,
+        /// Optional SIP status code from the trunk
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sip_status_code: Option<u16>,
+        /// Optional SIP status text from the trunk
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sip_status: Option<String>,
     },
 }
 
@@ -779,5 +795,49 @@ mod tests {
         assert!(json.contains(r#""type":"track_subscribed""#));
         assert!(json.contains(r#""track_kind":"video""#));
         assert!(!json.contains("name"));
+    }
+
+    #[test]
+    fn test_config_message_parses_sip_dial() {
+        let json = r#"{"type":"config","audio":false,"sip_dial":{"to":"+15105551234","from":"+15105550123","participant_identity":"pstn-target"}}"#;
+        let msg: IncomingMessage = serde_json::from_str(json).expect("Should deserialize");
+
+        match msg {
+            IncomingMessage::Config {
+                sip_dial: Some(dial),
+                ..
+            } => {
+                assert_eq!(dial.to, "+15105551234");
+                assert_eq!(dial.from, "+15105550123");
+                assert_eq!(dial.participant_identity.as_deref(), Some("pstn-target"));
+                assert!(dial.participant_name.is_none());
+            }
+            _ => panic!("Expected Config with sip_dial"),
+        }
+    }
+
+    #[test]
+    fn test_config_message_without_sip_dial_defaults_to_none() {
+        let json = r#"{"type":"config","audio":false}"#;
+        let msg: IncomingMessage = serde_json::from_str(json).expect("Should deserialize");
+
+        match msg {
+            IncomingMessage::Config { sip_dial, .. } => assert!(sip_dial.is_none()),
+            _ => panic!("Expected Config"),
+        }
+    }
+
+    #[test]
+    fn test_outbound_call_failed_serialization() {
+        let msg = OutgoingMessage::OutboundCallFailed {
+            reason: "sip trunk not found".to_string(),
+            sip_status_code: Some(503),
+            sip_status: Some("unavailable".to_string()),
+        };
+
+        let json = serde_json::to_string(&msg).expect("Should serialize");
+        assert!(json.contains(r#""type":"outbound_call_failed""#));
+        assert!(json.contains(r#""reason":"sip trunk not found""#));
+        assert!(json.contains(r#""sip_status_code":503"#));
     }
 }

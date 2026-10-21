@@ -15,6 +15,23 @@ use crate::{
     livekit::{LiveKitClient, operations::OperationQueue},
 };
 
+/// Where a session's LiveKit credentials come from.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum SessionOrigin {
+    /// Opened on `/ws`; Sayna creates the room and mints the token.
+    #[default]
+    Inbound,
+    /// Assigned by LiveKit; connect with the assignment's url and token and
+    /// leave the room alive when the session ends.
+    Agent { url: String, token: String },
+}
+
+impl SessionOrigin {
+    pub fn delete_room_on_close(&self) -> bool {
+        matches!(self, SessionOrigin::Inbound)
+    }
+}
+
 /// WebSocket connection state optimized for low latency
 ///
 /// Uses RwLock for state that changes rarely but is read frequently:
@@ -43,6 +60,8 @@ pub struct ConnectionState {
     pub loading_audio_error: Option<String>,
     /// Auth context for this connection (used for room metadata auth_id guard)
     pub auth: Auth,
+    /// Whether this session was opened on `/ws` or dispatched by LiveKit.
+    pub session_origin: SessionOrigin,
 }
 
 impl Default for ConnectionState {
@@ -64,6 +83,7 @@ impl ConnectionState {
             recording_egress_id: None,
             loading_audio_error: None,
             auth: Auth::empty(),
+            session_origin: SessionOrigin::default(),
         }
     }
 
@@ -80,6 +100,15 @@ impl ConnectionState {
             recording_egress_id: None,
             loading_audio_error: None,
             auth,
+            session_origin: SessionOrigin::default(),
+        }
+    }
+
+    /// Create a state for a session that already has LiveKit credentials.
+    pub fn with_origin(origin: SessionOrigin) -> Self {
+        Self {
+            session_origin: origin,
+            ..Self::new()
         }
     }
 

@@ -4,6 +4,7 @@
 //! touched here, so a lease never needs a second writer. While no socket is
 //! bound it is idle and may only be leased.
 
+use std::ops::ControlFlow;
 use std::time::Duration;
 
 use futures_util::stream::SplitSink;
@@ -25,6 +26,7 @@ use super::roster::{SlotEvent, SlotId};
 
 /// Keeps pre-warmed sockets alive under intermediary idle timeouts.
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
+const CONNECT_RETRY_BACKOFF: Duration = Duration::from_millis(250);
 
 pub enum SlotCmd {
     Assign {
@@ -43,7 +45,7 @@ pub enum Ack {
 }
 
 pub enum SlotInput {
-    Frame(IncomingMessage),
+    Frame(Box<IncomingMessage>),
     Closed { reason: String },
 }
 
@@ -61,6 +63,7 @@ pub(super) async fn run(
         Ok(ws) => ws,
         Err(reason) => {
             warn!(%reason, "could not open the Marvin socket");
+            tokio::time::sleep(CONNECT_RETRY_BACKOFF).await;
             report(&pool_tx, id, SlotEvent::Closed { reason });
             return;
         }
@@ -107,7 +110,7 @@ pub(super) async fn run(
                     }
                 }
                 Some(SlotCmd::Send(route)) => {
-                    if !send_route(&mut sink, route).await {
+                    if send_route(&mut sink, route).await.is_break() {
                         notify_closed(&bound, "send failed");
                         report(&pool_tx, id, SlotEvent::Closed { reason: "send failed".to_string() });
                         return;
@@ -119,7 +122,7 @@ pub(super) async fn run(
                     let Some(input) = &bound else { continue };
                     match serde_json::from_str::<IncomingMessage>(&text) {
                         Ok(msg) => {
-                            if input.send(SlotInput::Frame(msg)).is_err() {
+                            if input.send(SlotInput::Frame(Box::new(msg))).is_err() {
                                 break;
                             }
                         }
@@ -149,7 +152,6 @@ pub(super) async fn run(
         }
     }
 
-    // The input receiver is gone; the lease ended without the socket failing.
     let _ = sink.close().await;
     report(
         &pool_tx,
@@ -181,42 +183,34 @@ async fn connect(endpoint: &MarvinEndpoint) -> Result<Socket, String> {
 }
 
 async fn send_job_assigned(ws: &mut SocketSink, job: &JobBrief) -> Result<(), String> {
-    let frame = serde_json::json!({
-        "type": "job_assigned",
-        "job_id": job.job_id,
-        "room_name": job.room_name,
-        "room_sid": job.room_sid,
-        "job_type": job.job_type,
-        "metadata": job.metadata,
-        "participant": job.participant,
-    });
+    let mut frame = serde_json::to_value(job).map_err(|e| e.to_string())?;
+    frame["type"] = serde_json::Value::String("job_assigned".to_string());
     ws.send(Message::Text(frame.to_string().into()))
         .await
         .map_err(|e| e.to_string())
 }
 
-/// Returns false when the route closed the socket.
-async fn send_route(ws: &mut SocketSink, route: MessageRoute) -> bool {
+async fn send_route(ws: &mut SocketSink, route: MessageRoute) -> ControlFlow<()> {
     let sent = match route {
         MessageRoute::Outgoing(message) => match serde_json::to_string(&message) {
             Ok(json) => ws.send(Message::Text(json.into())).await,
             Err(e) => {
                 warn!(%e, "could not serialize an outgoing frame");
-                return true;
+                return ControlFlow::Continue(());
             }
         },
         MessageRoute::Binary(data) => ws.send(Message::Binary(data)).await,
         MessageRoute::Close => {
             let _ = ws.send(Message::Close(None)).await;
-            return false;
+            return ControlFlow::Break(());
         }
     };
 
     match sent {
-        Ok(()) => true,
+        Ok(()) => ControlFlow::Continue(()),
         Err(e) => {
             warn!(%e, "could not write to the Marvin socket");
-            false
+            ControlFlow::Break(())
         }
     }
 }

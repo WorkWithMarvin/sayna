@@ -37,8 +37,6 @@ pub enum SlotEvent {
     Closed { reason: String },
 }
 
-/// What the actor must do after a state change. Spawning is expressed as a
-/// count because the actor owns id allocation.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Plan {
     pub spawn: usize,
@@ -70,6 +68,9 @@ impl Roster {
                             out,
                         };
                     }
+                } else {
+                    // The slot was reaped while its handshake was in flight.
+                    let _ = out.send(SlotCmd::Close);
                 }
             }
             SlotEvent::AssignFailed { reason } | SlotEvent::Closed { reason } => {
@@ -78,10 +79,6 @@ impl Roster {
         }
     }
 
-    /// Target idle = `clamp(max(min - leased, spare), 0, max - leased)`.
-    ///
-    /// `spare` is headroom above live jobs, `min` is the floor when nothing is
-    /// live, and `max - leased` is all the room left once jobs own sockets.
     pub fn plan(&mut self, limits: &PoolLimits) -> Plan {
         self.slots
             .retain(|_, phase| !matches!(phase, SlotPhase::Dead { .. }));
@@ -135,8 +132,6 @@ impl Roster {
         }
     }
 
-    /// Warming sockets that never completed their handshake are dead weight:
-    /// they are replaced on the next plan.
     pub fn expire(&mut self, now: Instant, warm_timeout: Duration) -> Vec<SlotId> {
         let expired: Vec<SlotId> = self
             .slots
@@ -215,7 +210,6 @@ mod tests {
             roster.lease("job").expect("idle slot");
         }
         let plan = roster.plan(&limits(2, 2, 50));
-        // floor = max(2 - 3, 2) = 2, with one idle left -> one replacement.
         assert_eq!(plan.spawn, 1);
         assert!(plan.trim.is_empty());
     }
@@ -234,7 +228,6 @@ mod tests {
         let mut roster = idle_roster(1);
         roster.lease("job").expect("idle slot");
         let plan = roster.plan(&limits(2, 2, 2));
-        // max - leased = 1, idle = 0, so only one spawn even though spare is 2.
         assert_eq!(plan.spawn, 1);
     }
 
@@ -280,5 +273,13 @@ mod tests {
         let expired = roster.expire(future, Duration::from_secs(10));
         assert_eq!(expired, vec![SlotId(1)]);
         assert_eq!(roster.stats(4).warming, 0);
+    }
+
+    #[test]
+    fn connected_after_reaping_closes_the_slot() {
+        let mut roster = Roster::default();
+        let (out, mut rx) = mpsc::unbounded_channel();
+        roster.apply(SlotId(7), SlotEvent::Connected { out });
+        assert!(matches!(rx.try_recv(), Ok(SlotCmd::Close)));
     }
 }
