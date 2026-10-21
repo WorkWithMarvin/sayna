@@ -241,6 +241,21 @@ impl TTSWebSocketConfig {
     }
 }
 
+/// Outbound SIP dial requested by Marvin in the `config` message. Carries
+/// intent only; trunk address and credentials stay in Sayna's `SipConfig`.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SipDialConfig {
+    /// Number to dial.
+    pub to: String,
+    /// Number the call originates from.
+    pub from: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub participant_identity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub participant_name: Option<String>,
+}
+
 /// Loading-indicator audio configuration supplied in the `config` message.
 #[derive(Deserialize, Serialize, Clone)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

@@ -15,6 +15,7 @@ pub mod middleware;
 pub mod routes;
 pub mod state;
 pub mod utils;
+pub mod worker;
 
 // Re-export commonly used items for convenience
 pub use config::ServerConfig;

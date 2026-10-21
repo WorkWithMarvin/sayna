@@ -50,6 +50,7 @@ pub async fn handle_incoming_message(
             tts_config,
             livekit,
             loading_audio,
+            sip_dial,
         } => {
             handle_config_message(
                 stream_id,
@@ -58,6 +59,7 @@ pub async fn handle_incoming_message(
                 tts_config,
                 livekit,
                 loading_audio,
+                sip_dial,
                 state,
                 message_tx,
                 app_state,

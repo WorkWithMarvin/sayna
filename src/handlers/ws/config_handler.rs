@@ -24,14 +24,14 @@ use crate::{
 
 use super::{
     config::{
-        LiveKitWebSocketConfig, LoadingAudioConfig, STTWebSocketConfig, TTSWebSocketConfig,
-        TurnDetectConfigUpdate, VADConfigUpdate, compute_tts_config_hash,
+        LiveKitWebSocketConfig, LoadingAudioConfig, STTWebSocketConfig, SipDialConfig,
+        TTSWebSocketConfig, TurnDetectConfigUpdate, VADConfigUpdate, compute_tts_config_hash,
     },
     messages::{
         MessageRoute, OutgoingMessage, ParticipantConnectedInfo, ParticipantDisconnectedInfo,
         TrackSubscribedInfo, UnifiedMessage,
     },
-    state::ConnectionState,
+    state::{ConnectionState, SessionOrigin},
 };
 
 /// Maximum wait time for providers to become ready (in seconds)
@@ -53,6 +53,65 @@ fn resolve_stream_id(stream_id: Option<String>) -> String {
         debug!("Generated stream_id: {}", generated);
         generated
     })
+}
+
+struct OutboundDialFailure {
+    reason: String,
+    sip_status_code: Option<u16>,
+    sip_status: Option<String>,
+}
+
+impl OutboundDialFailure {
+    fn new(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+            sip_status_code: None,
+            sip_status: None,
+        }
+    }
+}
+
+async fn dial_outbound(
+    app_state: &Arc<AppState>,
+    room_name: &str,
+    dial: &SipDialConfig,
+) -> Result<(), OutboundDialFailure> {
+    let handler = app_state
+        .livekit_sip_handler
+        .as_ref()
+        .ok_or_else(|| OutboundDialFailure::new("SIP handler is not configured"))?;
+    let sip =
+        app_state.config.sip.as_ref().ok_or_else(|| {
+            OutboundDialFailure::new("SIP configuration is required for sip_dial")
+        })?;
+    let address = sip
+        .outbound_address
+        .as_deref()
+        .ok_or_else(|| OutboundDialFailure::new("SIP outbound address is not configured"))?;
+
+    let identity = dial
+        .participant_identity
+        .clone()
+        .unwrap_or_else(|| format!("sip_{}", dial.to));
+    let name = dial
+        .participant_name
+        .clone()
+        .unwrap_or_else(|| dial.to.clone());
+
+    handler
+        .create_outbound_call(
+            room_name,
+            &dial.to,
+            &dial.from,
+            address,
+            &identity,
+            &name,
+            sip.outbound_auth_username.clone(),
+            sip.outbound_auth_password.clone(),
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| OutboundDialFailure::new(e.to_string()))
 }
 
 /// Handle configuration message and initialize providers
@@ -85,6 +144,7 @@ pub async fn handle_config_message(
     tts_ws_config: Option<TTSWebSocketConfig>,
     livekit_ws_config: Option<LiveKitWebSocketConfig>,
     loading_audio: Option<LoadingAudioConfig>,
+    sip_dial: Option<SipDialConfig>,
     state: &Arc<RwLock<ConnectionState>>,
     message_tx: &mpsc::Sender<MessageRoute>,
     app_state: &Arc<AppState>,
@@ -92,6 +152,8 @@ pub async fn handle_config_message(
     // Generate stream_id if not provided by client
     let stream_id = resolve_stream_id(stream_id);
     info!("Session stream_id: {}", stream_id);
+
+    let origin = state.read().await.session_origin.clone();
 
     // Determine if audio processing is enabled (default to true)
     let audio_enabled = audio.unwrap_or(true);
@@ -205,6 +267,7 @@ pub async fn handle_config_message(
                 tts_ws_config.as_ref(),
                 loading_clip,
                 &app_state.config.livekit_url,
+                &origin,
                 voice_manager.as_ref(),
                 message_tx,
                 app_state.livekit_room_handler.as_ref(),
@@ -251,6 +314,30 @@ pub async fn handle_config_message(
     } else {
         (None, None)
     };
+
+    // Dial before `ready`: Marvin greets the caller on `ready`, so the callee
+    // must already be in the room when that frame leaves.
+    if let Some(dial) = sip_dial {
+        let result = match livekit_room_name.as_deref() {
+            Some(room_name) => dial_outbound(app_state, room_name, &dial).await,
+            None => Err(OutboundDialFailure::new(
+                "sip_dial requires a livekit room configuration",
+            )),
+        };
+        if let Err(failure) = result {
+            error!("Outbound SIP dial failed: {}", failure.reason);
+            let _ = message_tx
+                .send(MessageRoute::Outgoing(
+                    OutgoingMessage::OutboundCallFailed {
+                        reason: failure.reason,
+                        sip_status_code: failure.sip_status_code,
+                        sip_status: failure.sip_status,
+                    },
+                ))
+                .await;
+            return true;
+        }
+    }
 
     // Send ready message with optional LiveKit room information
     let _ = message_tx
@@ -765,6 +852,7 @@ async fn initialize_livekit_client(
     tts_config: Option<&TTSWebSocketConfig>,
     loading_clip: Option<LoadingClip>,
     livekit_url: &str,
+    origin: &SessionOrigin,
     voice_manager: Option<&Arc<VoiceManager>>,
     message_tx: &mpsc::Sender<MessageRoute>,
     room_handler: Option<&Arc<crate::livekit::room_handler::LiveKitRoomHandler>>,
@@ -786,113 +874,7 @@ async fn initialize_livekit_client(
     );
 
     let media_mode = LiveKitMediaMode::from_audio_enabled(audio_enabled);
-
-    // Get room handler or return error
-    let room_handler = match room_handler {
-        Some(handler) => handler,
-        None => {
-            error!("LiveKit room handler not initialized. Check API keys configuration.");
-            let _ = message_tx
-                .send(MessageRoute::Outgoing(OutgoingMessage::Error {
-                    message: "LiveKit room handler not initialized. Check API keys configuration."
-                        .to_string(),
-                }))
-                .await;
-            return None;
-        }
-    };
-
-    // Ensure room exists with proper tenant isolation
-    // Uses the same create-if-missing pattern as /livekit/token endpoint.
-    // If auth_id is provided, the room is associated with the tenant via metadata.
-    // If auth_id is empty/absent, the room is created without metadata enforcement.
-    if let Some(tenant_id) = auth_id
-        && !tenant_id.trim().is_empty()
-    {
-        // Authenticated mode: ensure room exists with correct auth_id
-        match room_handler
-            .ensure_room_with_auth_id(&livekit_ws_config.room_name, tenant_id)
-            .await
-        {
-            Ok(()) => {
-                info!(
-                    "Room '{}' ready with auth_id '{}'",
-                    livekit_ws_config.room_name, tenant_id
-                );
-            }
-            Err(crate::livekit::LiveKitError::MetadataConflict {
-                existing,
-                attempted,
-            }) => {
-                error!(
-                    "Cross-tenant room access denied: room '{}' belongs to '{}', but '{}' attempted access",
-                    livekit_ws_config.room_name, existing, attempted
-                );
-                let _ = message_tx
-                    .send(MessageRoute::Outgoing(OutgoingMessage::Error {
-                        message: format!(
-                            "Access denied: room '{}' belongs to a different tenant",
-                            livekit_ws_config.room_name
-                        ),
-                    }))
-                    .await;
-                return None;
-            }
-            Err(crate::livekit::LiveKitError::RoomNotFound(_)) => {
-                // This should not happen after create attempt - indicates a serious issue
-                error!(
-                    "Room '{}' could not be created or found after creation attempt",
-                    livekit_ws_config.room_name
-                );
-                let _ = message_tx
-                    .send(MessageRoute::Outgoing(OutgoingMessage::Error {
-                        message: format!(
-                            "Failed to create room '{}': room not found after creation attempt",
-                            livekit_ws_config.room_name
-                        ),
-                    }))
-                    .await;
-                return None;
-            }
-            Err(e) => {
-                error!(
-                    "Failed to prepare room '{}': {:?}",
-                    livekit_ws_config.room_name, e
-                );
-                let _ = message_tx
-                    .send(MessageRoute::Outgoing(OutgoingMessage::Error {
-                        message: format!("Failed to prepare room: {e:?}"),
-                    }))
-                    .await;
-                return None;
-            }
-        }
-    } else {
-        // Unauthenticated mode: ensure room exists without metadata enforcement
-        match room_handler
-            .ensure_room_exists(&livekit_ws_config.room_name)
-            .await
-        {
-            Ok(()) => {
-                debug!(
-                    "Room '{}' ready (unauthenticated context, no metadata)",
-                    livekit_ws_config.room_name
-                );
-            }
-            Err(e) => {
-                error!(
-                    "Failed to create room '{}': {:?}",
-                    livekit_ws_config.room_name, e
-                );
-                let _ = message_tx
-                    .send(MessageRoute::Outgoing(OutgoingMessage::Error {
-                        message: format!("Failed to create room: {e:?}"),
-                    }))
-                    .await;
-                return None;
-            }
-        }
-    }
+    let inbound = matches!(origin, SessionOrigin::Inbound);
 
     // Get participant identity and name with defaults
     let sayna_identity = livekit_ws_config
@@ -904,54 +886,176 @@ async fn initialize_livekit_client(
         .as_deref()
         .unwrap_or("Sayna AI");
 
-    // Generate agent token for AI participant with custom identity and name
-    let agent_token = match room_handler.agent_token_with_sip_admin_for_media_mode(
-        &livekit_ws_config.room_name,
-        sayna_identity,
-        sayna_name,
-        media_mode,
-    ) {
-        Ok(token) => token,
-        Err(e) => {
-            error!("Failed to generate agent token: {:?}", e);
-            let _ = message_tx
-                .send(MessageRoute::Outgoing(OutgoingMessage::Error {
-                    message: format!("Failed to generate agent token: {e:?}"),
-                }))
-                .await;
-            return None;
-        }
-    };
-
-    info!("LiveKit agent token generated successfully");
-    info!("Enabling recording: {}", livekit_ws_config.enable_recording);
-
-    // Start recording if requested
-    let egress_id = if livekit_ws_config.enable_recording {
-        match room_handler
-            .setup_room_recording(&livekit_ws_config.room_name, stream_id)
-            .await
-        {
-            Ok(id) => {
-                info!(
-                    "Room recording started with egress ID: {} for stream: {}",
-                    id, stream_id
-                );
-                Some(id)
-            }
-            Err(e) => {
-                error!("Failed to start room recording: {:?}", e);
-                // Continue without recording - not a critical error
-                None
-            }
-        }
+    let (livekit_url, agent_token, egress_id) = if let SessionOrigin::Agent { url, token } = origin
+    {
+        info!(
+            room = %livekit_ws_config.room_name,
+            "Using the assigned LiveKit room credentials"
+        );
+        (url.clone(), token.clone(), None)
     } else {
-        None
+        // Get room handler or return error
+        let room_handler = match room_handler {
+            Some(handler) => handler,
+            None => {
+                error!("LiveKit room handler not initialized. Check API keys configuration.");
+                let _ = message_tx
+                    .send(MessageRoute::Outgoing(OutgoingMessage::Error {
+                        message:
+                            "LiveKit room handler not initialized. Check API keys configuration."
+                                .to_string(),
+                    }))
+                    .await;
+                return None;
+            }
+        };
+
+        // Ensure room exists with proper tenant isolation
+        // Uses the same create-if-missing pattern as /livekit/token endpoint.
+        // If auth_id is provided, the room is associated with the tenant via metadata.
+        // If auth_id is empty/absent, the room is created without metadata enforcement.
+        if let Some(tenant_id) = auth_id
+            && !tenant_id.trim().is_empty()
+        {
+            // Authenticated mode: ensure room exists with correct auth_id
+            match room_handler
+                .ensure_room_with_auth_id(&livekit_ws_config.room_name, tenant_id)
+                .await
+            {
+                Ok(()) => {
+                    info!(
+                        "Room '{}' ready with auth_id '{}'",
+                        livekit_ws_config.room_name, tenant_id
+                    );
+                }
+                Err(crate::livekit::LiveKitError::MetadataConflict {
+                    existing,
+                    attempted,
+                }) => {
+                    error!(
+                        "Cross-tenant room access denied: room '{}' belongs to '{}', but '{}' attempted access",
+                        livekit_ws_config.room_name, existing, attempted
+                    );
+                    let _ = message_tx
+                        .send(MessageRoute::Outgoing(OutgoingMessage::Error {
+                            message: format!(
+                                "Access denied: room '{}' belongs to a different tenant",
+                                livekit_ws_config.room_name
+                            ),
+                        }))
+                        .await;
+                    return None;
+                }
+                Err(crate::livekit::LiveKitError::RoomNotFound(_)) => {
+                    // This should not happen after create attempt - indicates a serious issue
+                    error!(
+                        "Room '{}' could not be created or found after creation attempt",
+                        livekit_ws_config.room_name
+                    );
+                    let _ = message_tx
+                        .send(MessageRoute::Outgoing(OutgoingMessage::Error {
+                            message: format!(
+                                "Failed to create room '{}': room not found after creation attempt",
+                                livekit_ws_config.room_name
+                            ),
+                        }))
+                        .await;
+                    return None;
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to prepare room '{}': {:?}",
+                        livekit_ws_config.room_name, e
+                    );
+                    let _ = message_tx
+                        .send(MessageRoute::Outgoing(OutgoingMessage::Error {
+                            message: format!("Failed to prepare room: {e:?}"),
+                        }))
+                        .await;
+                    return None;
+                }
+            }
+        } else {
+            // Unauthenticated mode: ensure room exists without metadata enforcement
+            match room_handler
+                .ensure_room_exists(&livekit_ws_config.room_name)
+                .await
+            {
+                Ok(()) => {
+                    debug!(
+                        "Room '{}' ready (unauthenticated context, no metadata)",
+                        livekit_ws_config.room_name
+                    );
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to create room '{}': {:?}",
+                        livekit_ws_config.room_name, e
+                    );
+                    let _ = message_tx
+                        .send(MessageRoute::Outgoing(OutgoingMessage::Error {
+                            message: format!("Failed to create room: {e:?}"),
+                        }))
+                        .await;
+                    return None;
+                }
+            }
+        }
+
+        // Generate agent token for AI participant with custom identity and name
+        let agent_token = match room_handler.agent_token_with_sip_admin_for_media_mode(
+            &livekit_ws_config.room_name,
+            sayna_identity,
+            sayna_name,
+            media_mode,
+        ) {
+            Ok(token) => token,
+            Err(e) => {
+                error!("Failed to generate agent token: {:?}", e);
+                let _ = message_tx
+                    .send(MessageRoute::Outgoing(OutgoingMessage::Error {
+                        message: format!("Failed to generate agent token: {e:?}"),
+                    }))
+                    .await;
+                return None;
+            }
+        };
+
+        info!("LiveKit agent token generated successfully");
+        info!("Enabling recording: {}", livekit_ws_config.enable_recording);
+
+        // Start recording if requested
+        let egress_id = if livekit_ws_config.enable_recording {
+            match room_handler
+                .setup_room_recording(&livekit_ws_config.room_name, stream_id)
+                .await
+            {
+                Ok(id) => {
+                    info!(
+                        "Room recording started with egress ID: {} for stream: {}",
+                        id, stream_id
+                    );
+                    Some(id)
+                }
+                Err(e) => {
+                    error!("Failed to start room recording: {:?}", e);
+                    // Continue without recording - not a critical error
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        (livekit_url.to_string(), agent_token, egress_id)
     };
 
-    let livekit_config =
-        livekit_ws_config.to_livekit_config(agent_token, audio_enabled, tts_config, livekit_url);
-    let mut livekit_client = LiveKitClient::new(livekit_config);
+    let mut livekit_client = LiveKitClient::new(livekit_ws_config.to_livekit_config(
+        agent_token,
+        audio_enabled,
+        tts_config,
+        &livekit_url,
+    ));
 
     // Register the loading-indicator audio clip before connecting, if supplied.
     // Resampling to the published track format only fails on an internal/track
@@ -978,7 +1082,7 @@ async fn initialize_livekit_client(
     setup_livekit_data_callback(&mut livekit_client, message_tx);
 
     // Set up participant disconnect callback
-    setup_livekit_disconnect_callback(&mut livekit_client, message_tx);
+    setup_livekit_disconnect_callback(&mut livekit_client, message_tx, inbound);
 
     // Set up participant connect callback
     setup_livekit_connect_callback(&mut livekit_client, message_tx);
@@ -1116,6 +1220,7 @@ fn setup_livekit_data_callback(
 fn setup_livekit_disconnect_callback(
     livekit_client: &mut LiveKitClient,
     message_tx: &mpsc::Sender<MessageRoute>,
+    close_on_disconnect: bool,
 ) {
     let message_tx_clone = message_tx.clone();
 
@@ -1147,8 +1252,11 @@ fn setup_livekit_disconnect_callback(
             // Give a brief moment for the message to be sent
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-            // Close the WebSocket connection to trigger cleanup
-            let _ = message_tx.send(MessageRoute::Close).await;
+            // A dispatched job outlives any one participant; Marvin decides
+            // when to close. A plain /ws session ends with its participant.
+            if close_on_disconnect {
+                let _ = message_tx.send(MessageRoute::Close).await;
+            }
         });
     });
 }

@@ -102,6 +102,7 @@ fn test_incoming_message_serialization() {
         }),
         livekit: None,
         loading_audio: None,
+        sip_dial: None,
     };
 
     let json = serde_json::to_string(&config_msg).unwrap();
@@ -872,6 +873,7 @@ fn test_incoming_message_config_with_livekit() {
             listen_participants: vec![],
         }),
         loading_audio: None,
+        sip_dial: None,
     };
 
     let json = serde_json::to_string(&config_msg).unwrap();
@@ -909,6 +911,7 @@ fn test_incoming_message_config_without_livekit() {
         }),
         livekit: None,
         loading_audio: None,
+        sip_dial: None,
     };
 
     let json = serde_json::to_string(&config_msg).unwrap();
@@ -1210,6 +1213,7 @@ fn test_config_message_without_livekit_routing() {
         }),
         livekit: None, // No LiveKit configuration
         loading_audio: None,
+        sip_dial: None,
     };
 
     let json = serde_json::to_string(&config_msg).unwrap();
@@ -1264,6 +1268,7 @@ fn test_config_message_with_livekit_routing() {
             listen_participants: vec![],
         }),
         loading_audio: None,
+        sip_dial: None,
     };
 
     let json = serde_json::to_string(&config_msg).unwrap();
@@ -1452,6 +1457,7 @@ fn test_config_message_audio_disabled() {
             listen_participants: vec![],
         }),
         loading_audio: None,
+        sip_dial: None,
     };
 
     let json = serde_json::to_string(&config_msg).unwrap();
@@ -1513,6 +1519,7 @@ fn test_config_message_audio_default() {
         }),
         livekit: None,
         loading_audio: None,
+        sip_dial: None,
     };
 
     let json = serde_json::to_string(&config_msg).unwrap();
@@ -1702,6 +1709,7 @@ fn test_config_message_loading_audio_round_trip() {
             channels: Some(1),
             volume: Some(0.5),
         }),
+        sip_dial: None,
     };
 
     let json = serde_json::to_string(&config_msg).unwrap();

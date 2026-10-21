@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use super::parse_auth_api_secrets_json;
 use super::sip::{SipConfig, SipHookConfig};
 use super::utils::parse_bool;
+use super::validation::validate_worker_pool;
 use super::yaml::YamlConfig;
 use super::{AuthApiSecret, ServerConfig};
 
@@ -82,6 +83,55 @@ pub fn merge_config(
         "LIVEKIT_API_SECRET",
         yaml.livekit.as_ref().and_then(|l| l.api_secret.clone())
     );
+
+    let livekit_agent_name = yaml
+        .livekit
+        .as_ref()
+        .and_then(|l| l.agent_name.clone())
+        .or_else(|| env::var("AGENT_NAME").ok())
+        .or_else(|| env::var("LIVEKIT_AGENT_NAME").ok());
+
+    let marvin_ws_url = get_optional!(
+        "MARVIN_WS_URL",
+        yaml.livekit.as_ref().and_then(|l| l.marvin_ws_url.clone())
+    );
+    let marvin_ws_token = get_optional!(
+        "MARVIN_WS_TOKEN",
+        yaml.livekit
+            .as_ref()
+            .and_then(|l| l.marvin_ws_token.clone())
+    );
+    let worker_pool_min = yaml
+        .livekit
+        .as_ref()
+        .and_then(|l| l.worker_pool_min)
+        .or_else(|| {
+            env::var("WORKER_POOL_MIN")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+        })
+        .unwrap_or(2);
+    let worker_pool_spare = yaml
+        .livekit
+        .as_ref()
+        .and_then(|l| l.worker_pool_spare)
+        .or_else(|| {
+            env::var("WORKER_POOL_SPARE")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+        })
+        .unwrap_or(2);
+    let worker_pool_max = yaml
+        .livekit
+        .as_ref()
+        .and_then(|l| l.worker_pool_max)
+        .or_else(|| {
+            env::var("WORKER_POOL_MAX")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+        })
+        .unwrap_or(50);
+    validate_worker_pool(worker_pool_min, worker_pool_spare, worker_pool_max)?;
 
     // Provider API keys
     let deepgram_api_key = get_optional!(
@@ -234,6 +284,12 @@ pub fn merge_config(
         livekit_public_url,
         livekit_api_key,
         livekit_api_secret,
+        livekit_agent_name,
+        marvin_ws_url,
+        marvin_ws_token,
+        worker_pool_min,
+        worker_pool_spare,
+        worker_pool_max,
         deepgram_api_key,
         elevenlabs_api_key,
         google_credentials,

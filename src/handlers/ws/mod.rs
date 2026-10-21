@@ -449,4 +449,4 @@ mod tests;
 pub use config::{LiveKitWebSocketConfig, STTWebSocketConfig, TTSWebSocketConfig};
 pub use handler::ws_voice_handler;
 pub use messages::{IncomingMessage, OutgoingMessage, ParticipantDisconnectedInfo, UnifiedMessage};
-pub use state::ConnectionState;
+pub use state::{ConnectionState, SessionOrigin};

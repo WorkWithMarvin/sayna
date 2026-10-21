@@ -47,7 +47,9 @@ impl AppState {
                 api_key.clone(),
                 api_secret.clone(),
                 config.recording.clone(),
-            ) {
+            )
+            .map(|h| h.with_agent_name(config.livekit_agent_name.clone()))
+            {
                 Ok(handler) => Some(Arc::new(handler)),
                 Err(e) => {
                     tracing::warn!("Failed to initialize LiveKit room handler: {:?}", e);
@@ -249,6 +251,12 @@ mod tests {
             livekit_public_url: "http://localhost:7880".to_string(),
             livekit_api_key: Some("test_key".to_string()),
             livekit_api_secret: Some("test_secret".to_string()),
+            livekit_agent_name: None,
+            marvin_ws_url: None,
+            marvin_ws_token: None,
+            worker_pool_min: 2,
+            worker_pool_spare: 2,
+            worker_pool_max: 50,
             deepgram_api_key: None,
             elevenlabs_api_key: None,
             google_credentials: None,
@@ -284,6 +292,12 @@ mod tests {
             livekit_public_url: "http://localhost:7880".to_string(),
             livekit_api_key: None,    // Missing API key
             livekit_api_secret: None, // Missing API secret
+            livekit_agent_name: None,
+            marvin_ws_url: None,
+            marvin_ws_token: None,
+            worker_pool_min: 2,
+            worker_pool_spare: 2,
+            worker_pool_max: 50,
             deepgram_api_key: None,
             elevenlabs_api_key: None,
             google_credentials: None,
